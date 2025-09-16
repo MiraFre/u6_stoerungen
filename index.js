@@ -1,63 +1,58 @@
-const TelegramBot = require('node-telegram-bot-api');
-const fetch = require('node-fetch');
-const cheerio = require('cheerio');
+const fetch = require("node-fetch");
+const cheerio = require("cheerio");
+const TelegramBot = require("node-telegram-bot-api");
 
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const CHAT_ID = process.env.CHAT_ID;
+// Lies Token und Chat-ID aus den GitHub Secrets (bei Actions verfügbar)
+const token = process.env.TELEGRAM_TOKEN;
+const chatId = process.env.TELEGRAM_CHAT_ID;
 
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+// Initialisiere Bot nur wenn direkt interaktiv (z. B. lokal)
+let bot;
+if (token) {
+  bot = new TelegramBot(token, { polling: false });
+}
 
-// Zuletzt gesendete Meldungen speichern, um Doppelmeldungen zu vermeiden
-let lastNotified = new Set();
-
-async function checkDisruptions() {
+// Funktion zum Abrufen der Störungsinfos von rueckgr.at
+async function fetchU6Status() {
   try {
-    const res = await fetch("https://rueckgr.at/wienerlinien_dev/disruptions/");
-    const html = await res.text();
-    const $ = cheerio.load(html);
+    const res = await fetch("https://rueckgr.at/category/ubahn/u6/");
+    const body = await res.text();
+    const $ = cheerio.load(body);
 
-    $("li").each((i, el) => {
+    let results = [];
+    $(".post-title a").each((i, el) => {
       const text = $(el).text().trim();
-
-      // Nur Störungen für U6, nur Text nach "U6: "
-      const match = text.match(/U6: (.+)/);
-      if (match && !lastNotified.has(match[1])) {
-        lastNotified.add(match[1]);
-        bot.sendMessage(CHAT_ID, `⚠️ U6 Störung:\n${match[1]}`);
+      if (text.includes("U6")) {
+        // Nur den Teil NACH "U6" übernehmen
+        const cleaned = text.replace(/^U6\s*/i, "").trim();
+        results.push(cleaned);
       }
     });
+
+    if (results.length === 0) {
+      return ["Keine aktuellen U6-Meldungen gefunden."];
+    }
+
+    return results;
   } catch (err) {
-    console.error("Fehler beim Abrufen der Störungsdaten:", err);
+    console.error("Fehler beim Abrufen:", err);
+    return ["Fehler beim Abrufen der Daten."];
   }
 }
 
-// Alle 60 Sekunden prüfen
-setInterval(checkDisruptions, 60 * 1000);
+// Hauptfunktion: wird von GitHub Actions oder lokal aufgerufen
+(async () => {
+  const status = await fetchU6Status();
 
-// /status zeigt alle aktuellen U6-Störungen
-bot.onText(/\/status/, async (msg) => {
-  try {
-    const res = await fetch("https://rueckgr.at/wienerlinien_dev/disruptions/");
-    const html = await res.text();
-    const $ = cheerio.load(html);
+  const message = "Aktuelle U6-Meldungen:\n" + status.join("\n");
 
-    let u6Störungen = [];
+  console.log(message);
 
-    $("li").each((i, el) => {
-      const text = $(el).text().trim();
-      const match = text.match(/U6: (.+)/);
-      if (match) {
-        u6Störungen.push(match[1]);
-      }
-    });
-
-    if (u6Störungen.length === 0) {
-      bot.sendMessage(msg.chat.id, "✅ Keine aktuellen U6-Störungen.");
-    } else {
-      bot.sendMessage(msg.chat.id, `⚠️ Aktuelle U6-Störungen:\n\n${u6Störungen.join("\n\n")}`);
+  if (bot && chatId) {
+    try {
+      await bot.sendMessage(chatId, message);
+    } catch (err) {
+      console.error("Fehler beim Senden an Telegram:", err);
     }
-  } catch (err) {
-    console.error(err);
-    bot.sendMessage(msg.chat.id, "❌ Fehler beim Abrufen der Störungsdaten.");
   }
-});
+})();
