@@ -7,7 +7,7 @@ const CHAT_ID = process.env.CHAT_ID;
 
 const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
-// Zuletzt gesendete Meldungen
+// Zuletzt gesendete Meldungen speichern, um Doppelmeldungen zu vermeiden
 let lastNotified = new Set();
 
 async function checkDisruptions() {
@@ -18,9 +18,12 @@ async function checkDisruptions() {
 
     $("li").each((i, el) => {
       const text = $(el).text().trim();
-      if (text.includes("U6") && !lastNotified.has(text)) {
-        lastNotified.add(text);
-        bot.sendMessage(CHAT_ID, `⚠️ U6 Störung:\n${text}`);
+
+      // Nur Störungen für U6, nur Text nach "U6: "
+      const match = text.match(/U6: (.+)/);
+      if (match && !lastNotified.has(match[1])) {
+        lastNotified.add(match[1]);
+        bot.sendMessage(CHAT_ID, `⚠️ U6 Störung:\n${match[1]}`);
       }
     });
   } catch (err) {
@@ -28,8 +31,10 @@ async function checkDisruptions() {
   }
 }
 
+// Alle 60 Sekunden prüfen
 setInterval(checkDisruptions, 60 * 1000);
 
+// /status zeigt alle aktuellen U6-Störungen
 bot.onText(/\/status/, async (msg) => {
   try {
     const res = await fetch("https://rueckgr.at/wienerlinien_dev/disruptions/");
@@ -37,9 +42,13 @@ bot.onText(/\/status/, async (msg) => {
     const $ = cheerio.load(html);
 
     let u6Störungen = [];
+
     $("li").each((i, el) => {
       const text = $(el).text().trim();
-      if (text.includes("U6")) u6Störungen.push(text);
+      const match = text.match(/U6: (.+)/);
+      if (match) {
+        u6Störungen.push(match[1]);
+      }
     });
 
     if (u6Störungen.length === 0) {
