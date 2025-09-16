@@ -1,53 +1,66 @@
-require('dotenv').config();
-const TelegramBot = require('node-telegram-bot-api');
-const Parser = require('rss-parser');
+import TelegramBot from "node-telegram-bot-api";
+import fetch from "node-fetch";
+import * as cheerio from "cheerio";
 
-const bot = new TelegramBot(process.env.TELEGRAM_TOKEN, { polling: false });
-const chatId = process.env.CHAT_ID;
-const parser = new Parser();
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const CHAT_ID = process.env.CHAT_ID;
 
-// Liste mit mehreren Nitter-Instanzen
-const RSS_URLS = [
-  'https://nitter.net/wienerlinien/rss',
-  'https://nitter.cz/wienerlinien/rss',
-  'https://nitter.privacydev.net/wienerlinien/rss',
-  'https://nitter.poast.org/wienerlinien/rss'
-];
+const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
 
-let currentUrlIndex = 0;
-let lastItemId = null;
+// Zuletzt gesendete Meldungen speichern, um Doppelmeldungen im Intervall zu vermeiden
+let lastNotified = new Set();
 
-// Begrüßungsnachricht beim Start
-bot.sendMessage(chatId, "✅ U6-Bot ist gestartet und läuft!");
-
-// Feed-Check Funktion
-async function checkFeed() {
-  const url = RSS_URLS[currentUrlIndex];
+async function checkDisruptions() {
   try {
-    console.log(`[${new Date().toISOString()}] Hole Feed von ${url} ...`);
-    const feed = await parser.parseURL(url);
+    const res = await fetch("https://rueckgr.at/wienerlinien_dev/disruptions/");
+    const html = await res.text();
+    const $ = cheerio.load(html);
 
-    console.log(`[${new Date().toISOString()}] Feed erfolgreich geladen, ${feed.items.length} Einträge gefunden.`);
+    let found = false;
 
-    if (feed.items.length === 0) return;
+    $("li").each((i, el) => {
+      const text = $(el).text().trim();
 
-    const latest = feed.items[0];
-    if (latest.link !== lastItemId) {
-      lastItemId = latest.link;
-      if ((latest.content && latest.content.includes('U6')) || (latest.title && latest.title.includes('U6'))) {
-        console.log(`[${new Date().toISOString()}] ⚠️ Neue U6-Störung gefunden!`);
-        bot.sendMessage(chatId, `🚇⚠️ U6-Störung:\n\n${latest.content || latest.title}\n\n🔗 ${latest.link}`);
-      } else {
-        console.log(`[${new Date().toISOString()}] Neuer Tweet, aber nicht relevant für U6.`);
+      if (text.includes("U6") && !lastNotified.has(text)) {
+        found = true;
+        lastNotified.add(text);
+        bot.sendMessage(CHAT_ID, `⚠️ U6 Störung:\n${text}`);
       }
+    });
+
+    if (!found) {
+      console.log("✅ Keine neue U6 Störung gefunden.");
     }
   } catch (err) {
-    console.error(`[${new Date().toISOString()}] Fehler beim Abrufen von ${url}: ${err.message}`);
-    // Fallback: nächsten Server probieren
-    currentUrlIndex = (currentUrlIndex + 1) % RSS_URLS.length;
-    console.log(`[${new Date().toISOString()}] Wechsle zu Backup-Server: ${RSS_URLS[currentUrlIndex]}`);
+    console.error("Fehler beim Abrufen der Störungsdaten:", err);
   }
 }
 
-// alle 60 Sekunden checken
-setInterval(checkFeed, 60 * 1000);
+// alle 60 Sekunden prüfen
+setInterval(checkDisruptions, 60 * 1000);
+
+// /status zeigt **alle aktuellen U6-Störungen**, auch bereits gemeldete
+bot.onText(/\/status/, async (msg) => {
+  try {
+    const res = await fetch("https://rueckgr.at/wienerlinien_dev/disruptions/");
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    let u6Störungen = [];
+    $("li").each((i, el) => {
+      const text = $(el).text().trim();
+      if (text.includes("U6")) {
+        u6Störungen.push(text);
+      }
+    });
+
+    if (u6Störungen.length === 0) {
+      bot.sendMessage(msg.chat.id, "✅ Keine aktuellen U6-Störungen.");
+    } else {
+      bot.sendMessage(msg.chat.id, `⚠️ Aktuelle U6-Störungen:\n\n${u6Störungen.join("\n\n")}`);
+    }
+  } catch (err) {
+    console.error("Fehler beim Abrufen der Störungsdaten:", err);
+    bot.sendMessage(msg.chat.id, "❌ Fehler beim Abrufen der Störungsdaten.");
+  }
+});
