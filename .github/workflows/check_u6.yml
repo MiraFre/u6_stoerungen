@@ -1,0 +1,27 @@
+name: Check U6 disruptions
+
+on:
+  schedule:
+    # alle 5 Minuten (cron: Minute Stunde Tag Monat Wochentag)
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # optional manuell triggern
+
+jobs:
+  u6-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run U6 bot check
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: node index.js
