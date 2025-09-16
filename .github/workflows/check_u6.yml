@@ -1,27 +1,28 @@
-name: Check U6 disruptions
+name: Check U6 Status
 
 on:
   schedule:
-    # alle 5 Minuten (cron: Minute Stunde Tag Monat Wochentag)
-    - cron: '*/5 * * * *'
-  workflow_dispatch: # optional manuell triggern
+    - cron: "*/10 * * * *"   # alle 10 Minuten
+  workflow_dispatch:         # manuell auslösbar
 
 jobs:
-  u6-bot:
+  check:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: 20
 
       - name: Install dependencies
         run: npm install
 
-      - name: Run U6 bot check
+      - name: Run script
+        run: node index.js
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          CHAT_ID: ${{ secrets.CHAT_ID }}
-        run: node index.js
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
